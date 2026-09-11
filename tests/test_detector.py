@@ -33,6 +33,25 @@ def test_detects_phone_number(detector: PiiDetector):
     assert "PHONE_NUMBER" in _types(entities)
 
 
+def test_detects_international_format_phone_numbers(detector: PiiDetector):
+    """
+    Regression test: Presidio's default PHONE_NUMBER recognizer (without a
+    region hint) misses several common international "+<country code>"
+    formats -- confirmed by direct testing during a live smoke test of this
+    service. A custom pattern recognizer was added specifically to catch
+    these, since this proxy's core use case (EU-to-US transfer) makes
+    international-format numbers the common case, not the edge case.
+    """
+    cases = [
+        "My number is +1-555-123-4567, call anytime.",
+        "Reach me at +15551234567 during business hours.",
+        "UK office: +44 20 7946 0958.",
+    ]
+    for text in cases:
+        entities = detector.detect(text)
+        assert "PHONE_NUMBER" in _types(entities), f"failed to detect phone number in: {text!r}"
+
+
 def test_detects_us_ssn_as_structured_id_pattern(detector: PiiDetector):
     text = "His SSN is 523-45-6789 on file."
     entities = detector.detect(text)

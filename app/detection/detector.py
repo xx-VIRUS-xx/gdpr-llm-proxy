@@ -29,10 +29,14 @@ over):
     scripts, nicknames, misspellings, and names embedded in unusual sentence
     structures can be missed by the NER model.
   - Regex-based structured detectors can false-negative on non-standard
-    formats (e.g. locally formatted phone numbers without a country code
-    outside the configured region) and can false-positive on numbers that
-    merely look like the pattern (e.g. an order number that matches a
-    phone-number shape).
+    formats and can false-positive on numbers that merely look like the
+    pattern (e.g. an order number that matches a phone-number shape). An
+    explicit pattern recognizer is added below for international
+    "+<country code>..." phone numbers, since Presidio's default recognizer
+    misses these without a region hint and this proxy's primary use case
+    (EU-to-US transfer) makes international-format numbers common, not rare.
+    Locally formatted numbers without any country code or leading '+' in an
+    unfamiliar regional format can still be missed.
   - Detection quality depends on the underlying spaCy model; smaller models
     trade recall for speed/memory.
   - This module does not guarantee legal GDPR compliance by itself -- see
@@ -43,10 +47,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
-from presidio_analyzer import AnalyzerEngine, RecognizerResult
+from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 
 from app.config import settings
+
+# Presidio's built-in PHONE_NUMBER recognizer (phonenumbers library under the
+# hood) reliably catches domestic-format numbers but misses numbers written
+# in international "+<country code>" form (e.g. "+1-555-123-4567",
+# "+15551234567") when no region hint is supplied -- confirmed by direct
+# testing. Since this proxy exists specifically to protect EU-to-US data
+# transfers, international-format numbers are the common case, not the edge
+# case, so this gap is patched with an explicit pattern recognizer rather
+# than left as a documented limitation.
+_INTL_PHONE_PATTERN = Pattern(
+    name="intl_phone_number",
+    # '+' followed by 7-15 digits, optionally grouped with spaces/dashes/dots/parens.
+    regex=r"\+\d{1,3}[-.\s]?\(?\d{1,4}\)?(?:[-.\s]?\d{2,4}){2,4}",
+    score=0.6,
+)
+_INTL_PHONE_RECOGNIZER = PatternRecognizer(
+    supported_entity="PHONE_NUMBER",
+    patterns=[_INTL_PHONE_PATTERN],
+    name="IntlPhoneNumberRecognizer",
+)
 
 # Entity types we ask Presidio to look for. This list intentionally spans
 # both the "structured" (regex/checksum-backed) and "unstructured"
@@ -99,7 +123,9 @@ def _build_analyzer(spacy_model: str) -> AnalyzerEngine:
     }
     provider = NlpEngineProvider(nlp_configuration=nlp_configuration)
     nlp_engine = provider.create_engine()
-    return AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=["en"])
+    analyzer = AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=["en"])
+    analyzer.registry.add_recognizer(_INTL_PHONE_RECOGNIZER)
+    return analyzer
 
 
 class PiiDetector:
