@@ -1,0 +1,43 @@
+version: "3.9"
+
+# Local/dev stack for gdpr-llm-proxy.
+#
+# Redis here is used ONLY as the encrypted, short-TTL token-mapping store
+# (see app/tokenization/store.py) and, optionally, the usage counter -- not
+# as a general cache or queue. All PII values written to it are Fernet-
+# encrypted by the application before they reach Redis, and every key is
+# written with a TTL (default 600s, GLP_MAPPING_TTL_SECONDS), so Redis
+# expires them natively with no separate cleanup job.
+#
+# Qdrant is intentionally NOT included: this product's core value is
+# deterministic detection/masking/reversal, not semantic retrieval, and the
+# MVP has no organization-specific allowlist feature yet that would justify
+# it. See README "Why no Qdrant" for the full reasoning.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  proxy:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      GLP_STORE_BACKEND: redis
+      GLP_REDIS_URL: redis://redis:6379/0
+      GLP_USAGE_BACKEND: redis
+      GLP_OUTBOUND_MODE: mock
+      GLP_MAPPING_TTL_SECONDS: "600"
+      # Override in a real deployment -- see .env.example.
+      GLP_MAPPING_ENCRYPTION_KEY: "wJ0k8p8b9m3z1f4qz3f0m7f5m1c3v9m2x8b7v6n5m4k="
+    depends_on:
+      redis:
+        condition: service_healthy
