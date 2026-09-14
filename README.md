@@ -265,6 +265,8 @@ inline documentation of each setting. Key ones:
 |---|---|---|
 | `GLP_STORE_BACKEND` | `memory` | `memory` (dev) or `redis` (shared/prod) mapping store |
 | `GLP_MAPPING_ENCRYPTION_KEY` | (dev placeholder) | Fernet key encrypting mappings at rest -- **must** be changed outside local dev |
+| `GLP_REDIS_URL` | `redis://localhost:6379/0` | use `rediss://` (TLS) for any non-local deployment |
+| `GLP_ALLOW_INSECURE_REDIS_TRANSPORT` | `false` | explicit opt-out allowing a plain `redis://` URL with a Redis-backed store |
 | `GLP_MAPPING_TTL_SECONDS` | `600` | mapping store TTL |
 | `GLP_SPACY_MODEL` | `en_core_web_lg` | NER model used by Presidio |
 | `GLP_OUTBOUND_MODE` | `mock` | `mock` \| `openai` \| `anthropic` |
@@ -276,6 +278,15 @@ Generate a real encryption key:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+**Startup safety checks:** the app refuses to start (raising
+`InsecureConfigurationError`) if `GLP_STORE_BACKEND` or `GLP_USAGE_BACKEND`
+is `redis` and either (a) `GLP_MAPPING_ENCRYPTION_KEY` is still the
+source-controlled dev default -- that key is public, so every mapping
+encrypted with it is trivially decryptable -- or (b) `GLP_REDIS_URL` isn't
+`rediss://` and `GLP_ALLOW_INSECURE_REDIS_TRANSPORT` isn't explicitly set.
+Both checks are skipped entirely on the in-memory dev path, which stays
+zero-config on purpose. See `app/config.py::check_production_safety`.
 
 ## Running locally
 
