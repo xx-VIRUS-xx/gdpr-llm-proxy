@@ -38,6 +38,7 @@ A stateless-per-request HTTP proxy that masks personal data before an LLM call l
 ## Key design decisions
 
 - **Presidio instead of hand-rolled regex.** Structured PII gets pattern + validation recognizers; names/locations get NER. One custom recognizer patches a verified gap (international-format phone numbers).
+- **Collision-free numbering across turns.** New tokens continue from the highest index already in the session for that entity type, so a later request can never reuse a token and overwrite an earlier mapping (`_next_free_indexes` in `masker.py`).
 - **Token format chosen for reversibility.** A fixed, unusual prefix turns unmasking into a literal regex scan, not fuzzy matching.
 - **Fail-safe on expiry.** An expired mapping leaves the token in the output rather than guessing a value. Wrong-looking is preferred over mis-attributed PII.
 - **Encrypt both backends.** The in-memory store also holds only ciphertext, so a heap dump or debug print of the store does not expose plaintext.
@@ -55,7 +56,6 @@ A stateless-per-request HTTP proxy that masks personal data before an LLM call l
 
 ## Known limitations and issues
 
-- **Token collision across turns (bug).** `main._mask_payload` creates fresh per-entity counters on every request, while `Masker` looks up existing tokens only by value. With a stable `X-Session-Id`, a *new* value in a later turn is minted as `..._0` again, overwriting the earlier mapping. Example: turn 1 "Alice" -> `<<GLP_PERSON_0>>`, turn 2 "Bob" -> `<<GLP_PERSON_0>>`; unmasking turn 1 then yields "Bob". A fix would seed counters from the session's existing tokens. Not yet fixed.
 - No authentication on the proxy: `X-Customer-Id` is trusted as sent.
 - `GET /v1/usage/{customer_id}` is unauthenticated.
 - Only OpenAI chat-completions and Anthropic messages shapes are handled; streaming and attachments are not.

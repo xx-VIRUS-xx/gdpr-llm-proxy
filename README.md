@@ -314,14 +314,15 @@ docker compose up --build
 .venv/bin/python -m pytest -v
 ```
 
-42 tests covering:
+55 tests covering:
 - `tests/test_detector.py`: structured PII (email, phone, IBAN, SSN-like
   national ID pattern), basic name detection, multi-entity text, overlap
   resolution, and an explicit documented false-negative case.
 - `tests/test_masker.py`: mask/unmask round-tripping, stable token reuse
-  within and across calls in a session, session isolation, unknown-token
-  and TTL-expiry handling, and the full "response echoes token back"
-  scenario the whole product depends on.
+  within and across calls in a session, token numbering across requests in a
+  multi-turn session (no reuse of an earlier turn's token), session isolation,
+  unknown-token and TTL-expiry handling, and the full "response echoes token
+  back" scenario the whole product depends on.
 - `tests/test_store.py`: encryption at rest (including "wrong key can't
   decrypt"), TTL expiry, session isolation/deletion, for both the
   in-memory and Redis (via `fakeredis`) backends.
