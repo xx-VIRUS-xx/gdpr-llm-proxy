@@ -1,5 +1,7 @@
 # gdpr-llm-proxy
 
+> System design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 A lightweight middleware/proxy that sits in front of your calls to
 US-hosted LLM APIs (OpenAI, Anthropic) and masks EU personal data (PII) in
 the outbound request before it leaves the EU, then reverses the masking on
