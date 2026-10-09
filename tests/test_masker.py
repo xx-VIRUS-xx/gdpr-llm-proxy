@@ -104,3 +104,69 @@ def test_response_echoing_token_gets_unmasked(detector):
     assert "Jane Doe" in final_response
     assert "jane.doe@example.com" in final_response
     assert "<<GLP_" not in final_response
+
+
+# --- multi-turn sessions: new values must never reuse an earlier token --------
+
+import re as _re
+
+from app.detection.detector import PiiEntity
+
+
+class StubDetector:
+    """Deterministic detector so these tests do not depend on an NLP model."""
+
+    NAMES = ("Alice", "Bob", "Carol")
+
+    def detect(self, text):
+        found = []
+        for name in self.NAMES:
+            for m in _re.finditer(name, text):
+                found.append(PiiEntity("PERSON", m.start(), m.end(), 0.9, name))
+        for m in _re.finditer(r"[\w.]+@[\w.]+\.\w+", text):
+            found.append(PiiEntity("EMAIL_ADDRESS", m.start(), m.end(), 0.9, m.group(0)))
+        return sorted(found, key=lambda e: e.start)
+
+
+def test_new_value_in_a_later_request_does_not_overwrite_an_earlier_token():
+    masker = make_masker(StubDetector())
+    # Each request starts with fresh counters, as in app.main._mask_payload.
+    turn1 = masker.mask_text("s", "hello Alice", {}).masked_text
+    turn2 = masker.mask_text("s", "hello Bob", {}).masked_text
+
+    assert TOKEN_PATTERN.findall(turn1) != TOKEN_PATTERN.findall(turn2)
+    assert masker.unmask_text("s", turn1) == "hello Alice"
+    assert masker.unmask_text("s", turn2) == "hello Bob"
+
+
+def test_resent_history_with_a_new_person_gets_distinct_tokens():
+    masker = make_masker(StubDetector())
+    masker.mask_text("s", "hello Alice", {})
+    masked = masker.mask_text("s", "Alice said hi to Bob", {}).masked_text
+
+    tokens = TOKEN_PATTERN.findall(masked)
+    assert len(tokens) == 2 and len(set(tokens)) == 2
+    assert masker.unmask_text("s", masked) == "Alice said hi to Bob"
+
+
+def test_numbering_is_tracked_per_entity_type_across_requests():
+    masker = make_masker(StubDetector())
+    masker.mask_text("s", "Alice at alice@example.com", {})
+    masked = masker.mask_text("s", "Bob at bob@example.com", {}).masked_text
+
+    assert "<<GLP_PERSON_1>>" in masked
+    assert "<<GLP_EMAIL_ADDRESS_1>>" in masked
+
+
+def test_caller_counters_that_are_higher_still_win():
+    masker = make_masker(StubDetector())
+    masker.mask_text("s", "hello Alice", {})
+    masked = masker.mask_text("s", "hello Bob", {"PERSON": 5}).masked_text
+    assert "<<GLP_PERSON_5>>" in masked
+
+
+def test_sessions_number_independently():
+    masker = make_masker(StubDetector())
+    masker.mask_text("a", "hello Alice", {})
+    masked = masker.mask_text("b", "hello Bob", {}).masked_text
+    assert "<<GLP_PERSON_0>>" in masked

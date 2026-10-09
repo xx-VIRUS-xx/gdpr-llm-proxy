@@ -31,11 +31,26 @@ from app.detection.detector import PiiDetector
 from app.tokenization.store import MappingStore
 
 TOKEN_PATTERN = re.compile(r"<<GLP_[A-Z0-9_]+_\d+>>")
+_TOKEN_PARTS = re.compile(r"^<<GLP_(?P<type>[A-Z0-9_]+)_(?P<index>\d+)>>$")
+
+
+def _safe_type(entity_type: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "_", entity_type.upper())
 
 
 def _make_token(entity_type: str, index: int) -> str:
-    safe_type = re.sub(r"[^A-Z0-9]", "_", entity_type.upper())
-    return f"<<GLP_{safe_type}_{index}>>"
+    return f"<<GLP_{_safe_type(entity_type)}_{index}>>"
+
+
+def _next_free_indexes(tokens) -> dict[str, int]:
+    """Per entity type, the first index not used by any of the session's existing tokens."""
+    next_free: dict[str, int] = {}
+    for token in tokens:
+        match = _TOKEN_PARTS.match(token)
+        if match:
+            index = int(match.group("index")) + 1
+            next_free[match.group("type")] = max(next_free.get(match.group("type"), 0), index)
+    return next_free
 
 
 @dataclass
@@ -69,6 +84,10 @@ class Masker:
 
         existing_values = self.store.all_tokens(session_id)
         value_to_existing_token = {v: t for t, v in existing_values.items()}
+        # Never reuse an index already taken in this session, even when the
+        # caller's counters start from zero (e.g. a new request in a multi-turn
+        # conversation): reusing one would overwrite an earlier turn's mapping.
+        next_free = _next_free_indexes(existing_values)
 
         value_to_token: dict[str, str] = {}
         pieces: list[str] = []
@@ -81,9 +100,11 @@ class Masker:
             elif original in value_to_token:
                 token = value_to_token[original]
             else:
-                idx = counters.get(entity.entity_type, 0)
+                safe_type = _safe_type(entity.entity_type)
+                idx = max(counters.get(entity.entity_type, 0), next_free.get(safe_type, 0))
                 token = _make_token(entity.entity_type, idx)
                 counters[entity.entity_type] = idx + 1
+                next_free[safe_type] = idx + 1
                 self.store.set(session_id, token, original, self.mapping_ttl_seconds)
                 value_to_token[original] = token
 

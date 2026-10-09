@@ -99,3 +99,25 @@ def test_no_pii_leaves_message_effectively_unchanged():
     assert resp.status_code == 200
     content = resp.json()["choices"][0]["message"]["content"]
     assert "What is the capital of France?" in content
+
+
+def test_multi_turn_session_keeps_two_people_distinct():
+    headers = {"X-Customer-Id": "cust-mt", "X-Session-Id": "sess-multi-turn"}
+    first = client.post(
+        "/v1/proxy/openai",
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "My name is Jane Doe."}]},
+        headers=headers,
+    )
+    assert first.status_code == 200
+
+    # Second turn of the same session mentions the earlier person and a new one.
+    second = client.post(
+        "/v1/proxy/openai",
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Jane Doe and John Smith met today."}]},
+        headers=headers,
+    )
+    content = second.json()["choices"][0]["message"]["content"]
+    # The mock forwarder echoes the masked text. If both people shared one
+    # token, unmasking would turn both into the same name.
+    assert "Jane Doe and John Smith" in content
+    assert "<<GLP_" not in content
